@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """
-Polymarket Near-Certain Scanner - Task 1: Fetch markets with pagination
+Polymarket Near-Certain Scanner
+Tasks 1-2: Fetch markets with pagination + Fetch tags and build slug/label map
 """
 
 import requests
@@ -65,22 +66,71 @@ def fetch_all_markets(max_markets=None):
     return all_markets
 
 
+def fetch_exclusion_tags():
+    """
+    Fetch specific exclusion tags (sports, esports, crypto) using individual lookups.
+    Returns dict with found tags: {slug: {slug, label, id}}
+    """
+    base_url = "https://gamma-api.polymarket.com/tags/slug"
+    exclusion_slugs = ['sports', 'esports', 'crypto']
+    found_tags = {}
+    
+    print(f"Fetching exclusion tags...")
+    
+    for slug in exclusion_slugs:
+        url = f"{base_url}/{slug}"
+        print(f"  Checking '{slug}'...", end=" ", flush=True)
+        
+        try:
+            response = requests.get(url, timeout=30)
+            
+            if response.status_code == 200:
+                tag_data = response.json()
+                found_tags[slug] = {
+                    'slug': tag_data.get('slug', slug),
+                    'label': tag_data.get('label', ''),
+                    'id': tag_data.get('id', '')
+                }
+                print(f"✓ Found (label: '{tag_data.get('label', 'N/A')}')")
+            elif response.status_code == 404:
+                print(f"✗ Not found (404)")
+            else:
+                print(f"✗ Error (status {response.status_code})")
+                
+        except requests.exceptions.RequestException as e:
+            print(f"✗ Error: {e}")
+    
+    return found_tags
+
+
 def main():
-    """Test: Print first 3 markets + total count"""
-    print("Fetching markets from Polymarket (limited to 300 for testing)...")
-    markets = fetch_all_markets(max_markets=300)
+    """Test Task 2: Print tag slugs/labels for sports / esports / crypto"""
+    print("="*60)
+    print("TASK 2: Fetch tags and build slug/label map")
+    print("="*60)
+    print()
+    
+    exclusion_tags = fetch_exclusion_tags()
     
     print(f"\n{'='*60}")
-    print(f"Total markets fetched: {len(markets)}")
-    print(f"{'='*60}")
-    print(f"\nFirst 3 markets:")
+    print("EXCLUSION TAGS SUMMARY")
+    print(f"{'='*60}\n")
     
-    for i, market in enumerate(markets[:3], 1):
-        print(f"\n--- Market {i} ---")
-        print(f"Question: {market.get('question', 'N/A')}")
-        print(f"Slug: {market.get('slug', 'N/A')}")
-        print(f"Active: {market.get('active', 'N/A')}")
-        print(f"Closed: {market.get('closed', 'N/A')}")
+    for slug in ['sports', 'esports', 'crypto']:
+        print(f"--- '{slug}' ---")
+        if slug in exclusion_tags:
+            tag = exclusion_tags[slug]
+            print(f"  Status: FOUND ✓")
+            print(f"  Slug:   {tag['slug']}")
+            print(f"  Label:  {tag['label']}")
+            print(f"  ID:     {tag['id']}")
+        else:
+            print(f"  Status: NOT FOUND ✗")
+        print()
+    
+    print(f"{'='*60}")
+    print(f"Task 2 complete: {len(exclusion_tags)}/3 exclusion tags found")
+    print(f"{'='*60}")
 
 
 if __name__ == "__main__":

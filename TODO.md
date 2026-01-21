@@ -18,8 +18,9 @@ No interpretation. No debugging by you.
     TEST: Print first 3 markets + total count
     NOTES: Offset-based pagination (limit=100). max_markets=300 for testing. Full fetch in final pipeline.
 
-[ ] 2. Fetch tags from GET /tags → build slug/label map  
+[PASS] 2. Fetch tags from GET /tags → build slug/label map  
     TEST: Print tag slugs/labels for sports / esports / crypto
+    NOTES: Used /tags/slug/{slug} endpoint for direct lookups. Found all 3: sports (ID:1), esports (ID:64), crypto (ID:21).
 
 [ ] 3. Exclude by tag slugs (sports / esports / crypto ONLY)  
     TEST: Print count before/after + 3 excluded market titles
