@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Polymarket Near-Certain Scanner
-Tasks 1-2: Fetch markets with pagination + Fetch tags and build slug/label map
+Tasks 1-3: Fetch markets + tags + exclude by tag slugs
 """
 
 import requests
@@ -11,7 +11,7 @@ import json
 def fetch_all_markets(max_markets=None):
     """
     Fetch all markets from Polymarket Gamma API with pagination.
-    Returns list of all market objects.
+    Returns list of all market objects with tags included.
     
     Args:
         max_markets: Optional limit on total markets to fetch (for testing)
@@ -26,7 +26,9 @@ def fetch_all_markets(max_markets=None):
     while True:
         params = {
             "limit": limit,
-            "offset": offset
+            "offset": offset,
+            "closed": "false",
+            "include_tag": "true"  # CRITICAL: includes tags in response
         }
         
         print(f"Fetching batch: offset={offset}, limit={limit}...", end=" ", flush=True)
@@ -91,7 +93,7 @@ def fetch_exclusion_tags():
                     'label': tag_data.get('label', ''),
                     'id': tag_data.get('id', '')
                 }
-                print(f"✓ Found (label: '{tag_data.get('label', 'N/A')}')")
+                print(f"✓ Found (label: '{tag_data.get('label', 'N/A')}', ID: {tag_data.get('id')})")
             elif response.status_code == 404:
                 print(f"✗ Not found (404)")
             else:
@@ -103,34 +105,88 @@ def fetch_exclusion_tags():
     return found_tags
 
 
+def exclude_by_tags(markets, exclusion_tags):
+    """
+    Exclude markets that have any of the exclusion tags.
+    Tags are now included in market objects via include_tag=true.
+    Returns (filtered_markets, excluded_markets).
+    """
+    # Build set of exclusion tag IDs and slugs/labels (case-insensitive)
+    exclusion_ids = set(int(tag['id']) for tag in exclusion_tags.values() if tag['id'])
+    exclusion_slugs = set(tag['slug'].lower() for tag in exclusion_tags.values())
+    exclusion_labels = set(tag['label'].lower() for tag in exclusion_tags.values())
+    
+    filtered = []
+    excluded = []
+    
+    for market in markets:
+        # Get tags array from market (now included with include_tag=true)
+        market_tags = market.get('tags', [])
+        
+        # Check if any market tag matches exclusion criteria
+        has_excluded_tag = False
+        matched_tags = []
+        
+        for tag in market_tags:
+            tag_id = tag.get('id')
+            tag_slug = tag.get('slug', '').lower()
+            tag_label = tag.get('label', '').lower()
+            
+            # Match on ID, slug, or label
+            if (tag_id in exclusion_ids or 
+                tag_slug in exclusion_slugs or 
+                tag_label in exclusion_labels):
+                has_excluded_tag = True
+                matched_tags.append(tag)
+        
+        if has_excluded_tag:
+            market['_matched_tags'] = matched_tags  # Store for debugging
+            excluded.append(market)
+        else:
+            filtered.append(market)
+    
+    return filtered, excluded
+
+
 def main():
-    """Test Task 2: Print tag slugs/labels for sports / esports / crypto"""
+    """Test Task 3: Exclude by tag slugs and print counts + sample excluded titles"""
     print("="*60)
-    print("TASK 2: Fetch tags and build slug/label map")
+    print("TASK 3: Exclude by tag slugs (sports/esports/crypto)")
     print("="*60)
     print()
     
+    # Fetch exclusion tags
     exclusion_tags = fetch_exclusion_tags()
+    print()
+    
+    # Fetch markets with tags included
+    markets = fetch_all_markets(max_markets=300)
+    print()
+    
+    # Apply exclusions
+    print("Applying tag-based exclusions...")
+    filtered_markets, excluded_markets = exclude_by_tags(markets, exclusion_tags)
     
     print(f"\n{'='*60}")
-    print("EXCLUSION TAGS SUMMARY")
-    print(f"{'='*60}\n")
-    
-    for slug in ['sports', 'esports', 'crypto']:
-        print(f"--- '{slug}' ---")
-        if slug in exclusion_tags:
-            tag = exclusion_tags[slug]
-            print(f"  Status: FOUND ✓")
-            print(f"  Slug:   {tag['slug']}")
-            print(f"  Label:  {tag['label']}")
-            print(f"  ID:     {tag['id']}")
-        else:
-            print(f"  Status: NOT FOUND ✗")
-        print()
-    
+    print("EXCLUSION RESULTS")
     print(f"{'='*60}")
-    print(f"Task 2 complete: {len(exclusion_tags)}/3 exclusion tags found")
+    print(f"Before exclusion: {len(markets)} markets")
+    print(f"After exclusion:  {len(filtered_markets)} markets")
+    print(f"Excluded:         {len(excluded_markets)} markets")
     print(f"{'='*60}")
+    
+    # Show 3 excluded market titles
+    if excluded_markets:
+        print(f"\nFirst 3 excluded market titles:\n")
+        for i, market in enumerate(excluded_markets[:3], 1):
+            question = market.get('question', 'N/A')
+            matched_tags = market.get('_matched_tags', [])
+            tag_info = ', '.join([f"{t.get('label', 'N/A')} (ID:{t.get('id')})" for t in matched_tags])
+            print(f"{i}. {question}")
+            print(f"   Excluded by tags: [{tag_info}]")
+            print()
+    else:
+        print("\nNo markets were excluded.")
 
 
 if __name__ == "__main__":

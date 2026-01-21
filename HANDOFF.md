@@ -15,6 +15,7 @@ These files override any chat memory or assumptions.
 - TODO: FROZEN
 - Implementation: Task 1 COMPLETE (scanner.py created)
 - Implementation: Task 2 COMPLETE (exclusion tags fetched)
+- Implementation: Task 3 COMPLETE (tag-based exclusions working)
 
 
 ## Working Mode

@@ -22,8 +22,9 @@ No interpretation. No debugging by you.
     TEST: Print tag slugs/labels for sports / esports / crypto
     NOTES: Used /tags/slug/{slug} endpoint for direct lookups. Found all 3: sports (ID:1), esports (ID:64), crypto (ID:21).
 
-[ ] 3. Exclude by tag slugs (sports / esports / crypto ONLY)  
+[PASS] 3. Exclude by tag slugs (sports / esports / crypto ONLY)  
     TEST: Print count before/after + 3 excluded market titles
+    NOTES: Used include_tag=true param on /markets endpoint. Excluded 212/300 markets (sports ID:1, esports ID:64, crypto ID:21).
 
 [ ] 4. Exclude by keywords (esports backup filter ONLY)  
     TEST: Print excluded titles caught by keyword filter
