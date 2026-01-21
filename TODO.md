@@ -30,8 +30,9 @@ No interpretation. No debugging by you.
     TEST: Print excluded titles caught by keyword filter
     NOTES: Keyword filter working correctly. 0 additional exclusions (all esports already caught by tag filter in Task 3).
 
-[ ] 5. Apply 0.95 threshold on outcome prices  
+[PASS] 5. Apply 0.95 threshold on outcome prices  
     TEST: Print count meeting threshold + 3 example markets
+    NOTES: 64/88 markets meet threshold (≥0.95). Prices correctly parsed from stringified JSON arrays.
 
 [ ] 6. Flatten multi-outcome markets to rows  
     TEST: Show before/after for 1 multi-outcome market

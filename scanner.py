@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Polymarket Near-Certain Scanner
-Tasks 1-4: Fetch markets + tags + exclude by tags + exclude by keywords
+Tasks 1-5: Fetch markets + tags + exclude by tags/keywords + apply price threshold
 """
 
 import requests
@@ -192,10 +192,55 @@ def exclude_by_keywords(markets):
     return filtered, excluded
 
 
+def apply_price_threshold(markets, threshold=0.95):
+    """
+    Keep markets where ANY outcome price >= threshold.
+    
+    Market data structure:
+    - outcomes: stringified JSON array like '["Yes", "No"]'
+    - outcomePrices: stringified JSON array like '["0.65", "0.35"]'
+    
+    Returns (markets_meeting_threshold, markets_below_threshold).
+    """
+    meeting_threshold = []
+    below_threshold = []
+    
+    for market in markets:
+        # Parse outcomes and prices (they're stringified JSON)
+        outcomes_str = market.get('outcomes', '[]')
+        prices_str = market.get('outcomePrices', '[]')
+        
+        try:
+            outcomes = json.loads(outcomes_str)
+            prices = json.loads(prices_str)
+            
+            # Convert price strings to floats
+            prices = [float(p) for p in prices]
+            
+            # Check if ANY price meets threshold
+            max_price = max(prices) if prices else 0.0
+            
+            if max_price >= threshold:
+                # Store parsed data for later use
+                market['_parsed_outcomes'] = outcomes
+                market['_parsed_prices'] = prices
+                market['_max_price'] = max_price
+                meeting_threshold.append(market)
+            else:
+                below_threshold.append(market)
+                
+        except (json.JSONDecodeError, ValueError) as e:
+            # Skip markets with malformed price data
+            print(f"Warning: Skipping market due to parse error: {e}")
+            below_threshold.append(market)
+    
+    return meeting_threshold, below_threshold
+
+
 def main():
-    """Test Task 4: Exclude by keywords and print excluded titles"""
+    """Test Task 5: Apply 0.95 threshold and print count + examples"""
     print("="*60)
-    print("TASK 4: Exclude by keywords (esports backup filter)")
+    print("TASK 5: Apply 0.95 threshold on outcome prices")
     print("="*60)
     print()
     
@@ -207,7 +252,7 @@ def main():
     markets = fetch_all_markets(max_markets=300)
     print()
     
-    # Apply tag-based exclusions first
+    # Apply tag-based exclusions
     print("Applying tag-based exclusions...")
     after_tags, excluded_by_tags = exclude_by_tags(markets, exclusion_tags)
     print(f"After tag exclusions: {len(after_tags)} markets remaining")
@@ -215,28 +260,38 @@ def main():
     
     # Apply keyword-based exclusions
     print("Applying keyword-based exclusions...")
-    final_markets, excluded_by_keywords = exclude_by_keywords(after_tags)
+    after_keywords, excluded_by_keywords = exclude_by_keywords(after_tags)
+    print(f"After keyword exclusions: {len(after_keywords)} markets remaining")
+    print()
+    
+    # Apply price threshold
+    print("Applying 0.95 price threshold...")
+    final_markets, below_threshold = apply_price_threshold(after_keywords, threshold=0.95)
     
     print(f"\n{'='*60}")
-    print("KEYWORD EXCLUSION RESULTS")
+    print("PRICE THRESHOLD RESULTS")
     print(f"{'='*60}")
-    print(f"Before keyword filter: {len(after_tags)} markets")
-    print(f"After keyword filter:  {len(final_markets)} markets")
-    print(f"Excluded by keywords:  {len(excluded_by_keywords)} markets")
+    print(f"Before threshold:  {len(after_keywords)} markets")
+    print(f"Meeting threshold: {len(final_markets)} markets (price >= 0.95)")
+    print(f"Below threshold:   {len(below_threshold)} markets (price < 0.95)")
     print(f"{'='*60}")
     
-    # Show excluded market titles caught by keyword filter
-    if excluded_by_keywords:
-        print(f"\nMarkets excluded by keyword filter:\n")
-        for i, market in enumerate(excluded_by_keywords, 1):
+    # Show 3 example markets meeting threshold
+    if final_markets:
+        print(f"\nFirst 3 markets meeting threshold:\n")
+        for i, market in enumerate(final_markets[:3], 1):
             question = market.get('question', 'N/A')
-            matched_keywords = market.get('_matched_keywords', [])
-            keyword_info = ', '.join(matched_keywords)
+            outcomes = market.get('_parsed_outcomes', [])
+            prices = market.get('_parsed_prices', [])
+            max_price = market.get('_max_price', 0.0)
+            
             print(f"{i}. {question}")
-            print(f"   Matched keywords: [{keyword_info}]")
+            print(f"   Outcomes: {outcomes}")
+            print(f"   Prices:   {prices}")
+            print(f"   Max price: {max_price:.3f}")
             print()
     else:
-        print("\nNo markets were excluded by keyword filter.")
+        print("\nNo markets met the 0.95 threshold.")
 
 
 if __name__ == "__main__":
