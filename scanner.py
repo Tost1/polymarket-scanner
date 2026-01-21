@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Polymarket Near-Certain Scanner
-Tasks 1-3: Fetch markets + tags + exclude by tag slugs
+Tasks 1-4: Fetch markets + tags + exclude by tags + exclude by keywords
 """
 
 import requests
@@ -148,10 +148,54 @@ def exclude_by_tags(markets, exclusion_tags):
     return filtered, excluded
 
 
+def exclude_by_keywords(markets):
+    """
+    Exclude markets matching esports keywords (backup filter).
+    Searches in: question, event.title, category, subcategory (case-insensitive).
+    Returns (filtered_markets, excluded_markets).
+    """
+    esports_keywords = [
+        'esports',
+        'cs2',
+        'cs:go',
+        'dota',
+        'league of legends',
+        'valorant',
+        'overwatch'
+    ]
+    
+    filtered = []
+    excluded = []
+    
+    for market in markets:
+        # Extract searchable fields
+        question = market.get('question', '').lower()
+        event_title = market.get('event', {}).get('title', '').lower() if isinstance(market.get('event'), dict) else ''
+        category = market.get('category', '').lower()
+        subcategory = market.get('subcategory', '').lower()
+        
+        # Combine all searchable text
+        searchable_text = f"{question} {event_title} {category} {subcategory}"
+        
+        # Check if any keyword matches
+        matched_keywords = []
+        for keyword in esports_keywords:
+            if keyword in searchable_text:
+                matched_keywords.append(keyword)
+        
+        if matched_keywords:
+            market['_matched_keywords'] = matched_keywords  # Store for debugging
+            excluded.append(market)
+        else:
+            filtered.append(market)
+    
+    return filtered, excluded
+
+
 def main():
-    """Test Task 3: Exclude by tag slugs and print counts + sample excluded titles"""
+    """Test Task 4: Exclude by keywords and print excluded titles"""
     print("="*60)
-    print("TASK 3: Exclude by tag slugs (sports/esports/crypto)")
+    print("TASK 4: Exclude by keywords (esports backup filter)")
     print("="*60)
     print()
     
@@ -163,30 +207,36 @@ def main():
     markets = fetch_all_markets(max_markets=300)
     print()
     
-    # Apply exclusions
+    # Apply tag-based exclusions first
     print("Applying tag-based exclusions...")
-    filtered_markets, excluded_markets = exclude_by_tags(markets, exclusion_tags)
+    after_tags, excluded_by_tags = exclude_by_tags(markets, exclusion_tags)
+    print(f"After tag exclusions: {len(after_tags)} markets remaining")
+    print()
+    
+    # Apply keyword-based exclusions
+    print("Applying keyword-based exclusions...")
+    final_markets, excluded_by_keywords = exclude_by_keywords(after_tags)
     
     print(f"\n{'='*60}")
-    print("EXCLUSION RESULTS")
+    print("KEYWORD EXCLUSION RESULTS")
     print(f"{'='*60}")
-    print(f"Before exclusion: {len(markets)} markets")
-    print(f"After exclusion:  {len(filtered_markets)} markets")
-    print(f"Excluded:         {len(excluded_markets)} markets")
+    print(f"Before keyword filter: {len(after_tags)} markets")
+    print(f"After keyword filter:  {len(final_markets)} markets")
+    print(f"Excluded by keywords:  {len(excluded_by_keywords)} markets")
     print(f"{'='*60}")
     
-    # Show 3 excluded market titles
-    if excluded_markets:
-        print(f"\nFirst 3 excluded market titles:\n")
-        for i, market in enumerate(excluded_markets[:3], 1):
+    # Show excluded market titles caught by keyword filter
+    if excluded_by_keywords:
+        print(f"\nMarkets excluded by keyword filter:\n")
+        for i, market in enumerate(excluded_by_keywords, 1):
             question = market.get('question', 'N/A')
-            matched_tags = market.get('_matched_tags', [])
-            tag_info = ', '.join([f"{t.get('label', 'N/A')} (ID:{t.get('id')})" for t in matched_tags])
+            matched_keywords = market.get('_matched_keywords', [])
+            keyword_info = ', '.join(matched_keywords)
             print(f"{i}. {question}")
-            print(f"   Excluded by tags: [{tag_info}]")
+            print(f"   Matched keywords: [{keyword_info}]")
             print()
     else:
-        print("\nNo markets were excluded.")
+        print("\nNo markets were excluded by keyword filter.")
 
 
 if __name__ == "__main__":

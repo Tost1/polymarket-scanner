@@ -26,8 +26,9 @@ No interpretation. No debugging by you.
     TEST: Print count before/after + 3 excluded market titles
     NOTES: Used include_tag=true param on /markets endpoint. Excluded 212/300 markets (sports ID:1, esports ID:64, crypto ID:21).
 
-[ ] 4. Exclude by keywords (esports backup filter ONLY)  
+[PASS] 4. Exclude by keywords (esports backup filter ONLY)  
     TEST: Print excluded titles caught by keyword filter
+    NOTES: Keyword filter working correctly. 0 additional exclusions (all esports already caught by tag filter in Task 3).
 
 [ ] 5. Apply 0.95 threshold on outcome prices  
     TEST: Print count meeting threshold + 3 example markets
