@@ -19,6 +19,7 @@ These files override any chat memory or assumptions.
 - Implementation: Task 4 COMPLETE (keyword-based backup filter working)
 - Implementation: Task 5 COMPLETE (0.95 price threshold applied)
 - Implementation: Task 6 COMPLETE (multi-outcome flattening working)
+- Implementation: Task 7 COMPLETE (48h time window + hours/URL working)
 
 
 ## Working Mode

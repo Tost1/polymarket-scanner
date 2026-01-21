@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
 """
 Polymarket Near-Certain Scanner
-Tasks 1-6: Fetch markets + tags + exclude by tags/keywords + apply price threshold + flatten multi-outcome
+Tasks 1-7: Fetch markets + tags + exclude + threshold + flatten + 48h window + hours/URL
 """
 
 import requests
 import json
+from datetime import datetime, timezone, timedelta
 
 
 def fetch_all_markets(max_markets=None):
@@ -275,10 +276,70 @@ def flatten_multi_outcome_markets(markets, threshold=0.95):
     return flattened_rows
 
 
+def apply_time_window(rows, window_hours=48):
+    """
+    Filter rows to keep only markets ending within the next window_hours.
+    Exclude markets with missing endDate.
+    Add hours_remaining and market_url to each row.
+    
+    Returns (rows_in_window, rows_outside_window, now, window_end, min_date, max_date).
+    """
+    now = datetime.now(timezone.utc)
+    window_end = now + timedelta(hours=window_hours)
+    
+    in_window = []
+    outside_window = []
+    all_dates = []
+    
+    for row in rows:
+        market = row['market']
+        end_date_str = market.get('endDate')
+        
+        # Exclude markets with missing endDate
+        if not end_date_str:
+            outside_window.append(row)
+            continue
+        
+        try:
+            # Parse ISO 8601 datetime
+            end_date = datetime.fromisoformat(end_date_str.replace('Z', '+00:00'))
+            all_dates.append(end_date)
+            
+            # Check if within window
+            if now <= end_date <= window_end:
+                # Calculate hours remaining
+                time_remaining = end_date - now
+                hours_remaining = time_remaining.total_seconds() / 3600
+                
+                # Construct market URL using slug
+                slug = market.get('slug', '')
+                market_url = f"https://polymarket.com/event/{slug}" if slug else ""
+                
+                # Add calculated fields to row
+                row['resolve_datetime'] = end_date
+                row['hours_remaining'] = hours_remaining
+                row['market_url'] = market_url
+                
+                in_window.append(row)
+            else:
+                outside_window.append(row)
+                
+        except (ValueError, AttributeError) as e:
+            # Skip markets with malformed endDate
+            print(f"Warning: Skipping market due to date parse error: {e}")
+            outside_window.append(row)
+    
+    # Calculate min/max dates seen
+    min_date = min(all_dates) if all_dates else None
+    max_date = max(all_dates) if all_dates else None
+    
+    return in_window, outside_window, now, window_end, min_date, max_date
+
+
 def main():
-    """Test Task 6: Flatten multi-outcome markets"""
+    """Test Task 7: Apply 48h time window and calculate hours/URL"""
     print("="*60)
-    print("TASK 6: Flatten multi-outcome markets to rows")
+    print("TASK 7: Apply 48h time window + calculate hours/URL")
     print("="*60)
     print()
     
@@ -286,8 +347,8 @@ def main():
     exclusion_tags = fetch_exclusion_tags()
     print()
     
-    # Fetch markets with tags included
-    markets = fetch_all_markets(max_markets=300)
+    # Fetch markets with tags included (increased sample size)
+    markets = fetch_all_markets(max_markets=2000)
     print()
     
     # Apply tag-based exclusions
@@ -311,48 +372,51 @@ def main():
     # Flatten multi-outcome markets
     print("Flattening multi-outcome markets...")
     flattened_rows = flatten_multi_outcome_markets(final_markets, threshold=0.95)
+    print(f"Total flattened rows: {len(flattened_rows)}")
+    print()
+    
+    # Apply 48-hour time window
+    print("Applying 48-hour time window...")
+    rows_in_window, rows_outside, now, window_end, min_date, max_date = apply_time_window(flattened_rows, window_hours=48)
     
     print(f"\n{'='*60}")
-    print("FLATTENING RESULTS")
+    print("TIME WINDOW RESULTS")
     print(f"{'='*60}")
-    print(f"Markets meeting threshold: {len(final_markets)}")
-    print(f"Total flattened rows:      {len(flattened_rows)}")
-    print(f"{'='*60}")
-    
-    # Find and show a multi-outcome market example
-    print("\nLooking for multi-outcome market example...")
-    multi_outcome_example = None
-    for market in final_markets:
-        outcomes = market.get('_parsed_outcomes', [])
-        if len(outcomes) > 2:  # More than binary Yes/No
-            multi_outcome_example = market
-            break
-    
-    if multi_outcome_example:
-        print(f"\nBEFORE FLATTENING (1 market object):")
-        print(f"Question: {multi_outcome_example.get('question', 'N/A')}")
-        print(f"Outcomes: {multi_outcome_example.get('_parsed_outcomes', [])}")
-        print(f"Prices:   {multi_outcome_example.get('_parsed_prices', [])}")
-        
-        # Find all rows for this market
-        market_id = multi_outcome_example.get('id')
-        related_rows = [row for row in flattened_rows if row['market'].get('id') == market_id]
-        
-        print(f"\nAFTER FLATTENING ({len(related_rows)} rows):")
-        for i, row in enumerate(related_rows, 1):
-            print(f"{i}. Outcome: {row['outcome']}")
-            print(f"   YES price: {row['yes_price']:.3f}")
-            print(f"   NO price:  {row['no_price']:.3f}")
+    print(f"NOW (UTC):          {now.isoformat()}")
+    print(f"WINDOW_END (UTC):   {window_end.isoformat()}")
+    print(f"Before time filter: {len(flattened_rows)} rows")
+    print(f"After time filter:  {len(rows_in_window)} rows")
+    print(f"Outside window:     {len(rows_outside)} rows")
+    if min_date and max_date:
+        print(f"MIN Resolve_DateTime: {min_date.isoformat()}")
+        print(f"MAX Resolve_DateTime: {max_date.isoformat()}")
     else:
-        print("\nNo multi-outcome markets found in this batch.")
-        print("Showing first 3 flattened rows instead:\n")
-        for i, row in enumerate(flattened_rows[:3], 1):
+        print(f"MIN/MAX Resolve_DateTime: No valid dates found")
+    print(f"{'='*60}")
+    
+    # Show 3 sample rows
+    if rows_in_window:
+        print(f"\nFirst 3 rows within 48h window:\n")
+        for i, row in enumerate(rows_in_window[:3], 1):
             market = row['market']
-            print(f"{i}. Question: {market.get('question', 'N/A')}")
-            print(f"   Outcome: {row['outcome']}")
-            print(f"   YES price: {row['yes_price']:.3f}")
-            print(f"   NO price:  {row['no_price']:.3f}")
+            question = market.get('question', 'N/A')
+            
+            print(f"{i}. {question}")
+            print(f"   Outcome:           {row['outcome']}")
+            print(f"   Resolve_DateTime:  {row['resolve_datetime'].isoformat()}")
+            print(f"   Hours_Remaining:   {row['hours_remaining']:.2f}")
+            print(f"   Market_URL:        {row['market_url']}")
             print()
+        
+        # Assert all samples are within 0-48 hours
+        print("ASSERTION CHECK:")
+        for i, row in enumerate(rows_in_window[:3], 1):
+            hrs = row['hours_remaining']
+            in_range = 0 <= hrs <= 48
+            status = "✓ PASS" if in_range else "✗ FAIL"
+            print(f"  Sample {i}: {hrs:.2f}h - {status} (0 <= Hours_Remaining <= 48)")
+    else:
+        print("\nNo markets found within 48-hour window in this batch.")
 
 
 if __name__ == "__main__":

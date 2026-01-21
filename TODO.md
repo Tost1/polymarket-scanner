@@ -38,8 +38,15 @@ No interpretation. No debugging by you.
     TEST: Show before/after for 1 multi-outcome market
     NOTES: Flattening works. 64 markets → 64 rows (all binary in test batch). Each row has outcome, yes_price, no_price.
 
-[ ] 7. Calculate Hours_Remaining + construct Market_URL  
-    TEST: Print 3 rows with URLs + hours remaining
+[PASS] 7. Calculate Hours_Remaining + construct Market_URL.
+    Apply time window: keep only markets with Resolve_DateTime between now and now + 48 hours (rolling).
+    TEST:
+      - Print NOW (timestamp) and WINDOW_END (now+48h)
+      - Print count before/after time-window filter
+      - Print 3 sample rows with: Resolve_DateTime, Hours_Remaining, Market_URL
+      - Assert in output that all 3 samples have 0 <= Hours_Remaining <= 48
+    NOTES: 636 rows → 101 rows in 48h window. Time logic correct. URLs constructed as https://polymarket.com/event/{slug}.
+
 
 [ ] 8. Export to markets_raw.xlsx (sorted by Resolve_DateTime)  
     TEST: Open file in OnlyOffice and verify:
