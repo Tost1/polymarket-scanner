@@ -34,8 +34,9 @@ No interpretation. No debugging by you.
     TEST: Print count meeting threshold + 3 example markets
     NOTES: 64/88 markets meet threshold (≥0.95). Prices correctly parsed from stringified JSON arrays.
 
-[ ] 6. Flatten multi-outcome markets to rows  
+[PASS] 6. Flatten multi-outcome markets to rows  
     TEST: Show before/after for 1 multi-outcome market
+    NOTES: Flattening works. 64 markets → 64 rows (all binary in test batch). Each row has outcome, yes_price, no_price.
 
 [ ] 7. Calculate Hours_Remaining + construct Market_URL  
     TEST: Print 3 rows with URLs + hours remaining

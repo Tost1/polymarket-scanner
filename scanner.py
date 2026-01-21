@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Polymarket Near-Certain Scanner
-Tasks 1-5: Fetch markets + tags + exclude by tags/keywords + apply price threshold
+Tasks 1-6: Fetch markets + tags + exclude by tags/keywords + apply price threshold + flatten multi-outcome
 """
 
 import requests
@@ -237,10 +237,48 @@ def apply_price_threshold(markets, threshold=0.95):
     return meeting_threshold, below_threshold
 
 
+def flatten_multi_outcome_markets(markets, threshold=0.95):
+    """
+    Flatten multi-outcome markets to one row per outcome.
+    Only keep outcomes where price >= threshold.
+    
+    Each row contains:
+    - Original market data
+    - Specific outcome name
+    - YES price for that outcome
+    - NO price (1 - YES price)
+    
+    Returns list of flattened rows.
+    """
+    flattened_rows = []
+    
+    for market in markets:
+        outcomes = market.get('_parsed_outcomes', [])
+        prices = market.get('_parsed_prices', [])
+        
+        # Ensure we have matching outcomes and prices
+        if len(outcomes) != len(prices):
+            print(f"Warning: Mismatched outcomes/prices for market '{market.get('question', 'N/A')}'")
+            continue
+        
+        # Create one row per outcome that meets threshold
+        for outcome, yes_price in zip(outcomes, prices):
+            if yes_price >= threshold:
+                row = {
+                    'market': market,  # Keep reference to original market
+                    'outcome': outcome,
+                    'yes_price': yes_price,
+                    'no_price': 1.0 - yes_price
+                }
+                flattened_rows.append(row)
+    
+    return flattened_rows
+
+
 def main():
-    """Test Task 5: Apply 0.95 threshold and print count + examples"""
+    """Test Task 6: Flatten multi-outcome markets"""
     print("="*60)
-    print("TASK 5: Apply 0.95 threshold on outcome prices")
+    print("TASK 6: Flatten multi-outcome markets to rows")
     print("="*60)
     print()
     
@@ -267,31 +305,54 @@ def main():
     # Apply price threshold
     print("Applying 0.95 price threshold...")
     final_markets, below_threshold = apply_price_threshold(after_keywords, threshold=0.95)
+    print(f"Markets meeting threshold: {len(final_markets)}")
+    print()
+    
+    # Flatten multi-outcome markets
+    print("Flattening multi-outcome markets...")
+    flattened_rows = flatten_multi_outcome_markets(final_markets, threshold=0.95)
     
     print(f"\n{'='*60}")
-    print("PRICE THRESHOLD RESULTS")
+    print("FLATTENING RESULTS")
     print(f"{'='*60}")
-    print(f"Before threshold:  {len(after_keywords)} markets")
-    print(f"Meeting threshold: {len(final_markets)} markets (price >= 0.95)")
-    print(f"Below threshold:   {len(below_threshold)} markets (price < 0.95)")
+    print(f"Markets meeting threshold: {len(final_markets)}")
+    print(f"Total flattened rows:      {len(flattened_rows)}")
     print(f"{'='*60}")
     
-    # Show 3 example markets meeting threshold
-    if final_markets:
-        print(f"\nFirst 3 markets meeting threshold:\n")
-        for i, market in enumerate(final_markets[:3], 1):
-            question = market.get('question', 'N/A')
-            outcomes = market.get('_parsed_outcomes', [])
-            prices = market.get('_parsed_prices', [])
-            max_price = market.get('_max_price', 0.0)
-            
-            print(f"{i}. {question}")
-            print(f"   Outcomes: {outcomes}")
-            print(f"   Prices:   {prices}")
-            print(f"   Max price: {max_price:.3f}")
-            print()
+    # Find and show a multi-outcome market example
+    print("\nLooking for multi-outcome market example...")
+    multi_outcome_example = None
+    for market in final_markets:
+        outcomes = market.get('_parsed_outcomes', [])
+        if len(outcomes) > 2:  # More than binary Yes/No
+            multi_outcome_example = market
+            break
+    
+    if multi_outcome_example:
+        print(f"\nBEFORE FLATTENING (1 market object):")
+        print(f"Question: {multi_outcome_example.get('question', 'N/A')}")
+        print(f"Outcomes: {multi_outcome_example.get('_parsed_outcomes', [])}")
+        print(f"Prices:   {multi_outcome_example.get('_parsed_prices', [])}")
+        
+        # Find all rows for this market
+        market_id = multi_outcome_example.get('id')
+        related_rows = [row for row in flattened_rows if row['market'].get('id') == market_id]
+        
+        print(f"\nAFTER FLATTENING ({len(related_rows)} rows):")
+        for i, row in enumerate(related_rows, 1):
+            print(f"{i}. Outcome: {row['outcome']}")
+            print(f"   YES price: {row['yes_price']:.3f}")
+            print(f"   NO price:  {row['no_price']:.3f}")
     else:
-        print("\nNo markets met the 0.95 threshold.")
+        print("\nNo multi-outcome markets found in this batch.")
+        print("Showing first 3 flattened rows instead:\n")
+        for i, row in enumerate(flattened_rows[:3], 1):
+            market = row['market']
+            print(f"{i}. Question: {market.get('question', 'N/A')}")
+            print(f"   Outcome: {row['outcome']}")
+            print(f"   YES price: {row['yes_price']:.3f}")
+            print(f"   NO price:  {row['no_price']:.3f}")
+            print()
 
 
 if __name__ == "__main__":
