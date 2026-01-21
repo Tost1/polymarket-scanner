@@ -13,7 +13,7 @@ These files override any chat memory or assumptions.
 ## Current Status
 - Spec: FROZEN
 - TODO: FROZEN
-- Implementation: NOT STARTED (update when needed)
+- Implementation: Task 1 COMPLETE (scanner.py created)
 
 ## Working Mode
 - Work on EXACTLY ONE task from TODO.md at a time
