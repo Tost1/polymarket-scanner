@@ -1,0 +1,57 @@
+# HANDOFF — Polymarket Near-Certain Scanner
+
+## Project
+Repository: polymarket-scanner  
+Purpose: Read-only scanner that exports near-certain Polymarket markets to OnlyOffice `.xlsx`
+
+## Frozen Files (authoritative)
+- spec.md → requirements, filters, output schema
+- TODO.md → task order + testing protocol
+
+These files override any chat memory or assumptions.
+
+## Current Status
+- Spec: FROZEN
+- TODO: FROZEN
+- Implementation: NOT STARTED (update when needed)
+
+## Working Mode
+- Work on EXACTLY ONE task from TODO.md at a time
+- No skipping tasks
+- No parallel work
+- No refactors unless explicitly requested
+
+## Execution Model (CRITICAL)
+- Claude writes code
+- Claude ALWAYS outputs the **ENTIRE contents of any file that must change**
+- Human **copies and pastes the full file verbatim**
+- Human does NOT:
+  - edit
+  - re-indent
+  - add lines
+  - remove lines
+  - fix formatting
+- Claude provides ONE exact terminal command to run
+- Human runs the command and pastes **raw terminal output**
+- Claude diagnoses and fixes
+- Repeat until test passes
+- Only then commit and move to next task
+
+Human is a mechanical executor, not a reviewer or editor.
+
+## Code Constraints
+- Single script unless unavoidable
+- No classes unless strictly required
+- No abstractions
+- Small, readable functions only
+- Assume previous code MAY be wrong unless explicitly shown
+
+## Non-goals
+- No trading
+- No live monitoring
+- No AI ranking
+- No performance optimization
+
+## Next Task
+Refer to TODO.md and start with the first unchecked task.
+
