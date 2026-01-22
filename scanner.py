@@ -2,6 +2,7 @@
 """
 Polymarket Near-Certain Scanner
 Tasks 1-8: Fetch markets + tags + exclude + threshold + flatten + 48h window + hours/URL + XLSX export
+v1.0: Full pipeline, no testing limits
 """
 
 import requests
@@ -228,31 +229,35 @@ def apply_price_threshold(markets, threshold=0.95):
             prices = [float(p) for p in prices]
             
             # Determine if market is binary
-            is_binary = len(outcomes) == 2 and set([o.lower() for o in outcomes]) == {'yes', 'no'}
+            is_binary = outcomes == ["Yes", "No"]
             
-            # Check threshold
-            meets_threshold = False
             if is_binary:
-                # For binary: yes_price >= 0.95 OR yes_price <= 0.05
-                yes_price = prices[0] if outcomes[0].lower() == 'yes' else prices[1]
-                if yes_price >= threshold or yes_price <= (1 - threshold):
-                    meets_threshold = True
-            else:
-                # For multi-outcome: ANY price >= 0.95
-                if any(p >= threshold for p in prices):
-                    meets_threshold = True
-            
-            if meets_threshold:
-                # Store parsed data for later use
-                market['_parsed_outcomes'] = outcomes
-                market['_parsed_prices'] = prices
-                market['_is_binary'] = is_binary
-                meeting_threshold.append(market)
-            else:
-                below_threshold.append(market)
+                # Binary market: check YES price (prices[0])
+                yes_price = prices[0]
                 
-        except (json.JSONDecodeError, ValueError) as e:
-            # Skip markets with malformed price data
+                # Near-certain YES: yes_price >= 0.95
+                # Near-certain NO: yes_price <= 0.05
+                if yes_price >= threshold or yes_price <= (1 - threshold):
+                    market['_is_binary'] = True
+                    market['_yes_price'] = yes_price
+                    market['_no_price'] = prices[1] if len(prices) > 1 else (1 - yes_price)
+                    meeting_threshold.append(market)
+                else:
+                    below_threshold.append(market)
+            else:
+                # Multi-outcome market: check if ANY outcome >= threshold
+                max_price = max(prices) if prices else 0.0
+                
+                if max_price >= threshold:
+                    market['_is_binary'] = False
+                    market['_outcomes'] = outcomes
+                    market['_prices'] = prices
+                    meeting_threshold.append(market)
+                else:
+                    below_threshold.append(market)
+                    
+        except (json.JSONDecodeError, ValueError, IndexError) as e:
+            # Skip markets with malformed data
             print(f"Warning: Skipping market due to parse error: {e}")
             below_threshold.append(market)
     
@@ -261,84 +266,83 @@ def apply_price_threshold(markets, threshold=0.95):
 
 def flatten_multi_outcome_markets(markets, threshold=0.95):
     """
-    Flatten markets to one row per relevant outcome.
+    Flatten markets to 1 row per outcome.
     
-    For BINARY markets (["Yes", "No"]):
-    - If yes_price >= 0.95: create 1 row with outcome="Yes", certainty_side="YES"
-    - If yes_price <= 0.05: create 1 row with outcome="No", certainty_side="NO"
+    For binary markets:
+    - 1 row with outcome='YES' or 'NO' depending on which side is >= 0.95
     
-    For MULTI-OUTCOME markets:
-    - Create 1 row per outcome where price >= 0.95
-    - NO_Price stays empty (not fabricated)
-    - certainty_side = "OUTCOME"
+    For multi-outcome markets:
+    - 1 row per outcome where price >= threshold
     
-    Returns list of flattened rows.
+    Each row contains:
+    - market: original market object
+    - outcome: outcome name
+    - yes_price: outcome price
+    - no_price: None (for multi-outcome) or complementary price (for binary)
+    - certainty_side: 'YES', 'NO', or outcome name
+    - is_binary: boolean flag
     """
-    flattened_rows = []
+    rows = []
     
     for market in markets:
-        outcomes = market.get('_parsed_outcomes', [])
-        prices = market.get('_parsed_prices', [])
         is_binary = market.get('_is_binary', False)
         
-        # Ensure we have matching outcomes and prices
-        if len(outcomes) != len(prices):
-            print(f"Warning: Mismatched outcomes/prices for market '{market.get('question', 'N/A')}'")
-            continue
-        
         if is_binary:
-            # Binary market: create 1 row for the certain outcome
-            yes_idx = 0 if outcomes[0].lower() == 'yes' else 1
-            no_idx = 1 - yes_idx
-            yes_price = prices[yes_idx]
-            no_price = prices[no_idx]
+            # Binary market: create 1 row for the near-certain side
+            yes_price = market['_yes_price']
+            no_price = market['_no_price']
             
             if yes_price >= threshold:
                 # Near-certain YES
-                row = {
+                rows.append({
                     'market': market,
-                    'outcome': outcomes[yes_idx],
+                    'outcome': 'YES',
                     'yes_price': yes_price,
                     'no_price': no_price,
                     'certainty_side': 'YES',
                     'is_binary': True
-                }
-                flattened_rows.append(row)
+                })
             elif yes_price <= (1 - threshold):
-                # Near-certain NO
-                row = {
+                # Near-certain NO (yes_price <= 0.05 means no_price >= 0.95)
+                rows.append({
                     'market': market,
-                    'outcome': outcomes[no_idx],
+                    'outcome': 'NO',
                     'yes_price': yes_price,
                     'no_price': no_price,
                     'certainty_side': 'NO',
                     'is_binary': True
-                }
-                flattened_rows.append(row)
+                })
         else:
-            # Multi-outcome market: create 1 row per outcome >= threshold
+            # Multi-outcome market: create 1 row per outcome where price >= threshold
+            outcomes = market.get('_outcomes', [])
+            prices = market.get('_prices', [])
+            
             for outcome, price in zip(outcomes, prices):
                 if price >= threshold:
-                    row = {
+                    rows.append({
                         'market': market,
                         'outcome': outcome,
                         'yes_price': price,
-                        'no_price': None,  # No fabricated NO price
-                        'certainty_side': 'OUTCOME',
+                        'no_price': None,  # No complement for multi-outcome
+                        'certainty_side': outcome,
                         'is_binary': False
-                    }
-                    flattened_rows.append(row)
+                    })
     
-    return flattened_rows
+    return rows
 
 
 def apply_time_window(rows, window_hours=48):
     """
-    Filter rows to keep only markets ending within the next window_hours.
-    Exclude markets with missing endDate.
-    Add hours_remaining and market_url to each row.
+    Filter rows to include only markets with Resolve_DateTime in [now, now + window_hours].
+    Also calculate Hours_Remaining and construct Market_URL for each row.
     
-    Returns (rows_in_window, rows_outside_window, now, window_end, min_date, max_date).
+    Returns:
+        - in_window: rows within the time window
+        - outside_window: rows outside the time window
+        - now: current datetime
+        - window_end: end of time window
+        - min_date: earliest endDate seen
+        - max_date: latest endDate seen
     """
     now = datetime.now(timezone.utc)
     window_end = now + timedelta(hours=window_hours)
@@ -349,15 +353,12 @@ def apply_time_window(rows, window_hours=48):
     
     for row in rows:
         market = row['market']
-        end_date_str = market.get('endDate')
         
-        # Exclude markets with missing endDate
-        if not end_date_str:
-            outside_window.append(row)
-            continue
+        # Parse endDate (ISO format: "2025-01-23T14:00:00Z")
+        end_date_str = market.get('endDate', '')
         
         try:
-            # Parse ISO 8601 datetime
+            # Parse ISO datetime string
             end_date = datetime.fromisoformat(end_date_str.replace('Z', '+00:00'))
             all_dates.append(end_date)
             
@@ -525,9 +526,9 @@ def export_to_xlsx(rows, output_path='markets_raw.xlsx'):
 
 
 def main():
-    """Test Task 8: Export to markets_raw.xlsx sorted by Resolve_DateTime"""
+    """v1.0 Full Pipeline: No testing limits"""
     print("="*60)
-    print("TASK 8: Export to markets_raw.xlsx (URL FIX)")
+    print("POLYMARKET SCANNER v1.0 - FULL PIPELINE")
     print("="*60)
     print()
     
@@ -535,26 +536,27 @@ def main():
     exclusion_tags = fetch_exclusion_tags()
     print()
     
-    # Fetch markets with tags included
-    markets = fetch_all_markets(max_markets=2000)
+    # Fetch ALL markets (no limit)
+    markets = fetch_all_markets()
+    print(f"Total markets fetched: {len(markets)}")
     print()
     
     # Apply tag-based exclusions
     print("Applying tag-based exclusions...")
     after_tags, excluded_by_tags = exclude_by_tags(markets, exclusion_tags)
-    print(f"After tag exclusions: {len(after_tags)} markets remaining")
+    print(f"After tag exclusions: {len(after_tags)} markets remaining ({len(excluded_by_tags)} excluded)")
     print()
     
     # Apply keyword-based exclusions
     print("Applying keyword-based exclusions...")
     after_keywords, excluded_by_keywords = exclude_by_keywords(after_tags)
-    print(f"After keyword exclusions: {len(after_keywords)} markets remaining")
+    print(f"After keyword exclusions: {len(after_keywords)} markets remaining ({len(excluded_by_keywords)} excluded)")
     print()
     
     # Apply price threshold
     print("Applying 0.95 price threshold...")
     final_markets, below_threshold = apply_price_threshold(after_keywords, threshold=0.95)
-    print(f"Markets meeting threshold: {len(final_markets)}")
+    print(f"Markets meeting threshold: {len(final_markets)} ({len(below_threshold)} below threshold)")
     print()
     
     # Flatten markets
@@ -574,7 +576,7 @@ def main():
     # Apply 48-hour time window
     print("Applying 48-hour time window...")
     rows_in_window, rows_outside, now, window_end, min_date, max_date = apply_time_window(flattened_rows, window_hours=48)
-    print(f"Rows in 48h window: {len(rows_in_window)}")
+    print(f"Rows in 48h window: {len(rows_in_window)} ({len(rows_outside)} outside window)")
     print()
     
     # Export to XLSX
@@ -585,11 +587,18 @@ def main():
         print("="*60)
         print("EXPORT COMPLETE")
         print("="*60)
-        print("Verification required:")
-        print("  1. URLs use /market/ path (not /event/)")
-        print("  2. URLs are clickable formulas")
-        print("  3. URLs work when clicked")
+        print(f"File: markets_raw.xlsx")
+        print(f"Rows exported: {len(rows_in_window)}")
+        print()
+        print("Next steps:")
+        print("  1. Open markets_raw.xlsx in OnlyOffice")
+        print("  2. Verify column order matches spec.md")
+        print("  3. Verify sort by Resolve_DateTime (earliest first)")
+        print("  4. Test clickable URLs")
     else:
+        print("="*60)
+        print("NO MARKETS FOUND")
+        print("="*60)
         print("No markets found within 48-hour window. No file exported.")
 
 

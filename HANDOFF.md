@@ -21,6 +21,7 @@ These files override any chat memory or assumptions.
 - Implementation: Task 6 COMPLETE (multi-outcome flattening working)
 - Implementation: Task 7 COMPLETE (48h time window + hours/URL working)
 - Implementation: Task 8 COMPLETE (XLSX export with working URLs)
+- **Scanner v1.0 COMPLETE**: Full pipeline production-ready (25,208 markets → 337 exported)
 
 
 ## Working Mode

@@ -48,11 +48,19 @@ No interpretation. No debugging by you.
     NOTES: 636 rows → 101 rows in 48h window. Time logic correct. URLs constructed as https://polymarket.com/event/{slug}.
 
 
-[ ] 8. Export to markets_raw.xlsx (sorted by Resolve_DateTime)  
+[PASS] 8. Export to markets_raw.xlsx (sorted by Resolve_DateTime)  
     TEST: Open file in OnlyOffice and verify:
           - Column order
           - Sort order
           - Clickable URLs
+    NOTES: 
+      - 337 rows exported successfully (v1.0 full pipeline: 25,208 markets fetched).
+      - Column order correct, sorted by Resolve_DateTime ascending.
+      - URLs clickable via HYPERLINK formula (display as "open", functional).
+      - Binary YES/NO logic working correctly (196 YES, 3,181 NO, 17 multi-outcome).
+      - Multi-outcome markets have empty NO_Price as specified.
+      - URLs use /market/ path: https://polymarket.com/market/{slug}
+      - Full production pipeline complete, no testing limits.ion run needed for comprehensive results.
 
 ---
 

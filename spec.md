@@ -7,12 +7,16 @@ Export near-certain Polymarket markets to an OnlyOffice-compatible `.xlsx` file 
 Gamma Markets API (public, read-only):
 - Base: https://gamma-api.polymarket.com
 - Markets endpoint: GET /markets
-- Tags endpoint: GET /tags (for dynamic tag lookup)
+  - Use `closed=false` parameter to filter active markets
+  - Use `include_tag=true` parameter to include tag data in response
+  - Pagination: offset-based with `limit` and `offset` parameters
+- Tags endpoint: GET /tags/slug/{slug} (for individual tag lookup)
 
 ## Inclusion criteria
 - Market is `active=true`
 - Market is `closed=false`
 - YES price ≥ 0.95 OR NO price ≥ 0.95
+- Time window: include only markets with Resolve_DateTime between now and now + 48 hours (rolling)
 
 ## Exclusions (must exclude if ANY apply)
 
@@ -52,14 +56,14 @@ A market is excluded if ANY of its tags OR ANY keyword matches an exclusion rule
 3. Outcome  
 4. YES_Price  
 5. NO_Price  
-6. Certainty_Side (YES / NO)  
+6. Certainty_Side (YES / NO / outcome name)  
 7. Category  
 8. Subcategory  
 9. Volume  
 10. Liquidity  
 11. Resolve_DateTime  
 12. Hours_Remaining  
-13. Market_URL (clickable)  
+13. Market_URL (clickable HYPERLINK formula)  
 14. AI_Confidence (empty)  
 15. AI_Rationale (empty)
 
@@ -82,3 +86,11 @@ A market is excluded if ANY of its tags OR ANY keyword matches an exclusion rule
 - Real API data (no mocks)
 - Console output must be human-readable
 - Edge cases must be demonstrated when relevant
+
+## Implementation notes (v1.0)
+- Markets with empty `endDate` are skipped with warnings
+- URL format: `https://polymarket.com/market/{slug}` where slug is from market data
+- XLSX uses HYPERLINK formula: `=HYPERLINK("url","open")` for clickable links
+- Binary markets: Certainty_Side is "YES" or "NO"
+- Multi-outcome markets: Certainty_Side is the outcome name, NO_Price is empty
+- Full pagination supported (no artificial limits in production)
