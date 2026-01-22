@@ -1,12 +1,14 @@
 #!/usr/bin/env python3
 """
 Polymarket Near-Certain Scanner
-Tasks 1-7: Fetch markets + tags + exclude + threshold + flatten + 48h window + hours/URL
+Tasks 1-8: Fetch markets + tags + exclude + threshold + flatten + 48h window + hours/URL + XLSX export
 """
 
 import requests
 import json
 from datetime import datetime, timezone, timedelta
+from openpyxl import Workbook
+from openpyxl.styles import Font
 
 
 def fetch_all_markets(max_markets=None):
@@ -195,10 +197,17 @@ def exclude_by_keywords(markets):
 
 def apply_price_threshold(markets, threshold=0.95):
     """
-    Keep markets where ANY outcome price >= threshold.
+    Keep markets where ANY outcome has price >= threshold OR <= (1 - threshold).
+    
+    For binary markets (["Yes", "No"]):
+    - Near-certain YES: yes_price >= 0.95
+    - Near-certain NO: yes_price <= 0.05 (equivalent to no_price >= 0.95)
+    
+    For multi-outcome markets:
+    - Keep if ANY outcome price >= 0.95
     
     Market data structure:
-    - outcomes: stringified JSON array like '["Yes", "No"]'
+    - outcomes: stringified JSON array like '["Yes", "No"]' or '["Outcome A", "Outcome B", "Outcome C"]'
     - outcomePrices: stringified JSON array like '["0.65", "0.35"]'
     
     Returns (markets_meeting_threshold, markets_below_threshold).
@@ -218,14 +227,26 @@ def apply_price_threshold(markets, threshold=0.95):
             # Convert price strings to floats
             prices = [float(p) for p in prices]
             
-            # Check if ANY price meets threshold
-            max_price = max(prices) if prices else 0.0
+            # Determine if market is binary
+            is_binary = len(outcomes) == 2 and set([o.lower() for o in outcomes]) == {'yes', 'no'}
             
-            if max_price >= threshold:
+            # Check threshold
+            meets_threshold = False
+            if is_binary:
+                # For binary: yes_price >= 0.95 OR yes_price <= 0.05
+                yes_price = prices[0] if outcomes[0].lower() == 'yes' else prices[1]
+                if yes_price >= threshold or yes_price <= (1 - threshold):
+                    meets_threshold = True
+            else:
+                # For multi-outcome: ANY price >= 0.95
+                if any(p >= threshold for p in prices):
+                    meets_threshold = True
+            
+            if meets_threshold:
                 # Store parsed data for later use
                 market['_parsed_outcomes'] = outcomes
                 market['_parsed_prices'] = prices
-                market['_max_price'] = max_price
+                market['_is_binary'] = is_binary
                 meeting_threshold.append(market)
             else:
                 below_threshold.append(market)
@@ -240,14 +261,16 @@ def apply_price_threshold(markets, threshold=0.95):
 
 def flatten_multi_outcome_markets(markets, threshold=0.95):
     """
-    Flatten multi-outcome markets to one row per outcome.
-    Only keep outcomes where price >= threshold.
+    Flatten markets to one row per relevant outcome.
     
-    Each row contains:
-    - Original market data
-    - Specific outcome name
-    - YES price for that outcome
-    - NO price (1 - YES price)
+    For BINARY markets (["Yes", "No"]):
+    - If yes_price >= 0.95: create 1 row with outcome="Yes", certainty_side="YES"
+    - If yes_price <= 0.05: create 1 row with outcome="No", certainty_side="NO"
+    
+    For MULTI-OUTCOME markets:
+    - Create 1 row per outcome where price >= 0.95
+    - NO_Price stays empty (not fabricated)
+    - certainty_side = "OUTCOME"
     
     Returns list of flattened rows.
     """
@@ -256,22 +279,55 @@ def flatten_multi_outcome_markets(markets, threshold=0.95):
     for market in markets:
         outcomes = market.get('_parsed_outcomes', [])
         prices = market.get('_parsed_prices', [])
+        is_binary = market.get('_is_binary', False)
         
         # Ensure we have matching outcomes and prices
         if len(outcomes) != len(prices):
             print(f"Warning: Mismatched outcomes/prices for market '{market.get('question', 'N/A')}'")
             continue
         
-        # Create one row per outcome that meets threshold
-        for outcome, yes_price in zip(outcomes, prices):
+        if is_binary:
+            # Binary market: create 1 row for the certain outcome
+            yes_idx = 0 if outcomes[0].lower() == 'yes' else 1
+            no_idx = 1 - yes_idx
+            yes_price = prices[yes_idx]
+            no_price = prices[no_idx]
+            
             if yes_price >= threshold:
+                # Near-certain YES
                 row = {
-                    'market': market,  # Keep reference to original market
-                    'outcome': outcome,
+                    'market': market,
+                    'outcome': outcomes[yes_idx],
                     'yes_price': yes_price,
-                    'no_price': 1.0 - yes_price
+                    'no_price': no_price,
+                    'certainty_side': 'YES',
+                    'is_binary': True
                 }
                 flattened_rows.append(row)
+            elif yes_price <= (1 - threshold):
+                # Near-certain NO
+                row = {
+                    'market': market,
+                    'outcome': outcomes[no_idx],
+                    'yes_price': yes_price,
+                    'no_price': no_price,
+                    'certainty_side': 'NO',
+                    'is_binary': True
+                }
+                flattened_rows.append(row)
+        else:
+            # Multi-outcome market: create 1 row per outcome >= threshold
+            for outcome, price in zip(outcomes, prices):
+                if price >= threshold:
+                    row = {
+                        'market': market,
+                        'outcome': outcome,
+                        'yes_price': price,
+                        'no_price': None,  # No fabricated NO price
+                        'certainty_side': 'OUTCOME',
+                        'is_binary': False
+                    }
+                    flattened_rows.append(row)
     
     return flattened_rows
 
@@ -311,9 +367,10 @@ def apply_time_window(rows, window_hours=48):
                 time_remaining = end_date - now
                 hours_remaining = time_remaining.total_seconds() / 3600
                 
-                # Construct market URL using slug
-                slug = market.get('slug', '')
-                market_url = f"https://polymarket.com/event/{slug}" if slug else ""
+                # Construct market URL using market slug
+                # URL pattern: https://polymarket.com/market/{market_slug}
+                market_slug = market.get('slug', '')
+                market_url = f"https://polymarket.com/market/{market_slug}" if market_slug else ""
                 
                 # Add calculated fields to row
                 row['resolve_datetime'] = end_date
@@ -336,10 +393,141 @@ def apply_time_window(rows, window_hours=48):
     return in_window, outside_window, now, window_end, min_date, max_date
 
 
+def export_to_xlsx(rows, output_path='markets_raw.xlsx'):
+    """
+    Export rows to XLSX file sorted by Resolve_DateTime.
+    
+    Column order (from spec.md):
+    1. Event_Title
+    2. Market_Question
+    3. Outcome
+    4. YES_Price
+    5. NO_Price
+    6. Certainty_Side (YES / NO / OUTCOME)
+    7. Category
+    8. Subcategory
+    9. Volume
+    10. Liquidity
+    11. Resolve_DateTime
+    12. Hours_Remaining
+    13. Market_URL (clickable)
+    14. AI_Confidence (empty)
+    15. AI_Rationale (empty)
+    """
+    # Sort rows by resolve_datetime (earliest first)
+    sorted_rows = sorted(rows, key=lambda r: r['resolve_datetime'])
+    
+    # Create workbook and active sheet
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Markets"
+    
+    # Define headers (exact order from spec)
+    headers = [
+        'Event_Title',
+        'Market_Question',
+        'Outcome',
+        'YES_Price',
+        'NO_Price',
+        'Certainty_Side',
+        'Category',
+        'Subcategory',
+        'Volume',
+        'Liquidity',
+        'Resolve_DateTime',
+        'Hours_Remaining',
+        'Market_URL',
+        'AI_Confidence',
+        'AI_Rationale'
+    ]
+    
+    # Write headers
+    ws.append(headers)
+    
+    # Make headers bold
+    for cell in ws[1]:
+        cell.font = Font(bold=True)
+    
+    # Write data rows
+    for row in sorted_rows:
+        market = row['market']
+        
+        # Extract event title (handle both dict and string)
+        event = market.get('event')
+        if isinstance(event, dict):
+            event_title = event.get('title', '')
+        else:
+            event_title = str(event) if event else ''
+        
+        # Format NO_Price (empty for multi-outcome markets)
+        no_price_display = row['no_price'] if row['no_price'] is not None else ''
+        
+        # Format resolve datetime
+        resolve_datetime_str = row['resolve_datetime'].strftime('%Y-%m-%d %H:%M:%S UTC')
+        
+        # Build row data (exact column order)
+        row_data = [
+            event_title,
+            market.get('question', ''),
+            row['outcome'],
+            row['yes_price'],
+            no_price_display,
+            row['certainty_side'],
+            market.get('category', ''),
+            market.get('subcategory', ''),
+            market.get('volume', ''),
+            market.get('liquidity', ''),
+            resolve_datetime_str,
+            round(row['hours_remaining'], 2),
+            row['market_url'],
+            '',  # AI_Confidence (empty)
+            ''   # AI_Rationale (empty)
+        ]
+        
+        ws.append(row_data)
+    
+    # Set column widths for better readability
+    column_widths = {
+        'A': 30,  # Event_Title
+        'B': 60,  # Market_Question
+        'C': 30,  # Outcome
+        'D': 12,  # YES_Price
+        'E': 12,  # NO_Price
+        'F': 15,  # Certainty_Side
+        'G': 20,  # Category
+        'H': 20,  # Subcategory
+        'I': 15,  # Volume
+        'J': 15,  # Liquidity
+        'K': 22,  # Resolve_DateTime
+        'L': 15,  # Hours_Remaining
+        'M': 80,  # Market_URL
+        'N': 15,  # AI_Confidence
+        'O': 40   # AI_Rationale
+    }
+    
+    for col, width in column_widths.items():
+        ws.column_dimensions[col].width = width
+    
+    # Make URLs clickable using HYPERLINK formula (OnlyOffice-safe)
+    # Column M = 13 = Market_URL
+    url_col_idx = 13
+    for row_idx in range(2, len(sorted_rows) + 2):  # Start from row 2 (skip header)
+        cell = ws.cell(row=row_idx, column=url_col_idx)
+        url = cell.value
+        if url:
+            # Use HYPERLINK formula: =HYPERLINK("url","open")
+            cell.value = f'=HYPERLINK("{url}","open")'
+            cell.font = Font(color="0000FF", underline="single")
+    
+    # Save workbook
+    wb.save(output_path)
+    print(f"Exported {len(sorted_rows)} rows to {output_path}")
+
+
 def main():
-    """Test Task 7: Apply 48h time window and calculate hours/URL"""
+    """Test Task 8: Export to markets_raw.xlsx sorted by Resolve_DateTime"""
     print("="*60)
-    print("TASK 7: Apply 48h time window + calculate hours/URL")
+    print("TASK 8: Export to markets_raw.xlsx (URL FIX)")
     print("="*60)
     print()
     
@@ -347,7 +535,7 @@ def main():
     exclusion_tags = fetch_exclusion_tags()
     print()
     
-    # Fetch markets with tags included (increased sample size)
+    # Fetch markets with tags included
     markets = fetch_all_markets(max_markets=2000)
     print()
     
@@ -369,54 +557,40 @@ def main():
     print(f"Markets meeting threshold: {len(final_markets)}")
     print()
     
-    # Flatten multi-outcome markets
-    print("Flattening multi-outcome markets...")
+    # Flatten markets
+    print("Flattening markets...")
     flattened_rows = flatten_multi_outcome_markets(final_markets, threshold=0.95)
     print(f"Total flattened rows: {len(flattened_rows)}")
+    
+    # Count binary YES/NO rows
+    binary_yes = sum(1 for r in flattened_rows if r.get('is_binary') and r.get('certainty_side') == 'YES')
+    binary_no = sum(1 for r in flattened_rows if r.get('is_binary') and r.get('certainty_side') == 'NO')
+    multi_outcome = sum(1 for r in flattened_rows if not r.get('is_binary'))
+    print(f"  - Binary YES: {binary_yes}")
+    print(f"  - Binary NO: {binary_no}")
+    print(f"  - Multi-outcome: {multi_outcome}")
     print()
     
     # Apply 48-hour time window
     print("Applying 48-hour time window...")
     rows_in_window, rows_outside, now, window_end, min_date, max_date = apply_time_window(flattened_rows, window_hours=48)
+    print(f"Rows in 48h window: {len(rows_in_window)}")
+    print()
     
-    print(f"\n{'='*60}")
-    print("TIME WINDOW RESULTS")
-    print(f"{'='*60}")
-    print(f"NOW (UTC):          {now.isoformat()}")
-    print(f"WINDOW_END (UTC):   {window_end.isoformat()}")
-    print(f"Before time filter: {len(flattened_rows)} rows")
-    print(f"After time filter:  {len(rows_in_window)} rows")
-    print(f"Outside window:     {len(rows_outside)} rows")
-    if min_date and max_date:
-        print(f"MIN Resolve_DateTime: {min_date.isoformat()}")
-        print(f"MAX Resolve_DateTime: {max_date.isoformat()}")
-    else:
-        print(f"MIN/MAX Resolve_DateTime: No valid dates found")
-    print(f"{'='*60}")
-    
-    # Show 3 sample rows
+    # Export to XLSX
     if rows_in_window:
-        print(f"\nFirst 3 rows within 48h window:\n")
-        for i, row in enumerate(rows_in_window[:3], 1):
-            market = row['market']
-            question = market.get('question', 'N/A')
-            
-            print(f"{i}. {question}")
-            print(f"   Outcome:           {row['outcome']}")
-            print(f"   Resolve_DateTime:  {row['resolve_datetime'].isoformat()}")
-            print(f"   Hours_Remaining:   {row['hours_remaining']:.2f}")
-            print(f"   Market_URL:        {row['market_url']}")
-            print()
-        
-        # Assert all samples are within 0-48 hours
-        print("ASSERTION CHECK:")
-        for i, row in enumerate(rows_in_window[:3], 1):
-            hrs = row['hours_remaining']
-            in_range = 0 <= hrs <= 48
-            status = "✓ PASS" if in_range else "✗ FAIL"
-            print(f"  Sample {i}: {hrs:.2f}h - {status} (0 <= Hours_Remaining <= 48)")
+        print("Exporting to markets_raw.xlsx...")
+        export_to_xlsx(rows_in_window, output_path='markets_raw.xlsx')
+        print()
+        print("="*60)
+        print("EXPORT COMPLETE")
+        print("="*60)
+        print("Verification required:")
+        print("  1. URLs use /market/ path (not /event/)")
+        print("  2. URLs are clickable formulas")
+        print("  3. URLs work when clicked")
     else:
-        print("\nNo markets found within 48-hour window in this batch.")
+        print("No markets found within 48-hour window. No file exported.")
 
 
 if __name__ == "__main__":
